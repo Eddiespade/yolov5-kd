@@ -1,6 +1,6 @@
 # YOLOV5 V6.0知识蒸馏
 
-一些碎碎念： 3050Ti的算力太差了，yolov5s的 batch最大设为8，无语子
+一些碎碎念： 3050Ti的算力太差了，yolov5s的 batch最大设为8，yolov5m的 batch最大设为4。无语子
 
 --------------
 ### 调整一: 关闭了 **wandb** 
@@ -50,10 +50,14 @@ parser.add_argument('--temperature', type=int, default=20, help='temperature in 
 ```
  2. 在训练流程中添加kd
 ```python
+# 在使用的hyp.yaml文件中添加 计算kd损失的时候会用到的参数
+giou: 0.05
+kd: 1.0
+```
+```python
     # 加载教师模型
     if opt.kd:
         print("load teacher-model from", opt.teacher_weight)
-        # load teacher_model
         teacher_model = torch.load(opt.teacher_weight)
         if teacher_model.get("model", None) is not None:
             teacher_model = teacher_model["model"]
