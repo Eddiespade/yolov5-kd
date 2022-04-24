@@ -328,7 +328,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         if RANK != -1:
             train_loader.sampler.set_epoch(epoch)
         pbar = enumerate(train_loader)
-        LOGGER.info(('\n' + '%10s' * 7) % ('Epoch', 'gpu_mem', 'box', 'obj', 'cls', 'labels', 'img_size'))
+        LOGGER.info(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem', 'box', 'obj', 'cls', 'kd', 'labels', 'img_size'))
         if RANK in (-1, 0):
             pbar = tqdm(pbar, total=nb, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
         optimizer.zero_grad()
@@ -501,7 +501,7 @@ def parse_opt(known=False):
     parser = argparse.ArgumentParser()
     # ---------------------------------------- kd parser ---------------------------------------
     parser.add_argument('--kd', action='store_true', default=True, help='cache images for faster training')
-    parser.add_argument('--teacher_weight', type=str, default=ROOT / 'runs/weights/YOLOV5M-NO/weights/best.pt',
+    parser.add_argument('--teacher_weight', type=str, default='runs/train/m3/weights/last.pt',
                         help='initial teacher_weight path')
     parser.add_argument('--kd_loss_selected', type=str, default='l2', help='using kl/l2 loss in distillation')
     parser.add_argument('--temperature', type=int, default=20, help='temperature in distilling training')
@@ -510,8 +510,8 @@ def parse_opt(known=False):
     parser.add_argument('--cfg', type=str, default=ROOT / 'models/yolov5s.yaml', help='model.yaml path')
     parser.add_argument('--data', type=str, default=ROOT / 'data/VOC.yaml', help='dataset.yaml path')
     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-med.yaml', help='hyperparameters path')
-    parser.add_argument('--epochs', type=int, default=300)
-    parser.add_argument('--batch-size', type=int, default=8, help='total batch size for all GPUs, -1 for autobatch')
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--batch-size', type=int, default=4, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='train, val image size (pixels)')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
@@ -530,7 +530,7 @@ def parse_opt(known=False):
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     parser.add_argument('--workers', type=int, default=8, help='max dataloader workers (per RANK in DDP mode)')
     parser.add_argument('--project', default=ROOT / 'runs/train', help='save to project/name')
-    parser.add_argument('--name', default='exp', help='save to project/name')
+    parser.add_argument('--name', default='m-s-kd', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
     parser.add_argument('--cos-lr', action='store_true', help='cosine LR scheduler')
