@@ -700,9 +700,73 @@ class Classify(nn.Module):
         return self.flat(self.conv(z))  # flatten to x(b,c2)
 
 
-class SE(nn.Module):
+# 标准卷积层 + CBAM
+class ASCBAM(nn.Module):
+    # Standard convolution
+    def __init__(self, c1, ratio):  # ch_in, ch_out, kernel, stride, padding, groups
+        super(ASCBAM, self).__init__()
+        self.ca = ChannelAttention(c1, ratio, AS=False)
+        self.sa = SpatialAttention(c1, AS=False)
+
+    def forward(self, x):
+        x = self.sa(self.ca(x))
+        return x
+
+
+
+# add CBAM
+class SpatialAttention(nn.Module):
+    def __init__(self, in_planes, kernel_size=7, AS=False):
+        super(SpatialAttention, self).__init__()
+        self.conv3 = nn.Conv2d(in_planes, in_planes, 3, padding=1)
+        self.conv1_1 = nn.Conv2d(in_planes, in_planes, 1)
+        self.conv1 = nn.Conv2d(2, 1, kernel_size, padding=3, bias=False)  # concat完channel维度为2
+        self.sigmoid = nn.Sigmoid()
+        self.AS = AS
+
+    def forward(self, x):
+        if self.AS:
+            avg_out = torch.mean(x, dim=1, keepdim=True)
+            max_out = self.sigmoid(self.conv1_1(self.conv3(x)))
+            max_out1, _ = torch.max(max_out, dim=1, keepdim=True)
+            y = torch.cat([avg_out, max_out1], dim=1)  # 沿着channel维度concat一块
+        else:
+            avg_out = torch.mean(x, dim=1, keepdim=True)  # 沿着channel 维度计算均值和最大值
+            max_out1, _ = torch.max(x, dim=1, keepdim=True)
+            y = torch.cat([avg_out, max_out1], dim=1)  # 沿着channel维度concat一块
+        y = self.conv1(y)
+        y = self.sigmoid(y)
+        return x * y
+
+
+class ChannelAttention(nn.Module):
+    def __init__(self, in_planes, ratio=16, AS=False):
+        super(ChannelAttention, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        self.max_pool_3d = nn.AdaptiveAvgPool3d((in_planes, 1, 1))
+
+        self.conv3 = nn.Conv2d(in_planes, in_planes * 2, 3)
+        self.fc1 = nn.Conv2d(in_planes, in_planes // ratio, 1, bias=False)
+        self.relu1 = nn.ReLU()
+        self.fc2 = nn.Conv2d(in_planes // ratio, in_planes, 1, bias=False)
+        self.sigmoid = nn.Sigmoid()
+        self.AS = AS
+
+    def forward(self, x):
+        if self.AS:
+            max_out = self.fc2(self.relu1(self.fc1(self.max_pool_3d(self.conv3(x)))))
+            avg_out = self.fc2(self.relu1(self.fc1(self.avg_pool(x))))
+        else:
+            avg_out = self.fc2(self.relu1(self.fc1(self.avg_pool(x))))
+            max_out = self.fc2(self.relu1(self.fc1(self.max_pool(x))))
+        out = avg_out + max_out
+        return x * self.sigmoid(out)
+
+
+class SELayer(nn.Module):
     def __init__(self, c1, r=16):
-        super(SE, self).__init__()
+        super(SELayer, self).__init__()
         self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.l1 = nn.Linear(c1, c1 // r, bias=False)
         self.relu = nn.ReLU(inplace=True)
@@ -718,3 +782,77 @@ class SE(nn.Module):
         y = self.sig(y)
         y = y.view(b, c, 1, 1)
         return x * y.expand_as(x)
+
+
+class h_sigmoid(nn.Module):
+    def __init__(self, inplace=True):
+        super(h_sigmoid, self).__init__()
+        self.relu = nn.ReLU6(inplace=inplace)
+
+    def forward(self, x):
+        return self.relu(x + 3) / 6
+
+
+class h_swish(nn.Module):
+    def __init__(self, inplace=True):
+        super(h_swish, self).__init__()
+        self.sigmoid = h_sigmoid(inplace=inplace)
+
+    def forward(self, x):
+        return x * self.sigmoid(x)
+
+
+class CABlock(nn.Module):
+    def __init__(self, inp, oup, reduction=32):
+        super(CABlock, self).__init__()
+        self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
+        self.pool_w = nn.AdaptiveAvgPool2d((1, None))
+        mip = max(8, inp // reduction)
+        self.conv1 = nn.Conv2d(inp, mip, kernel_size=1, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(mip)
+        self.act = h_swish()
+        self.conv_h = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        self.conv_w = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, x):
+        identity = x
+        n, c, h, w = x.size()
+        x_h = self.pool_h(x)
+        x_w = self.pool_w(x).permute(0, 1, 3, 2)
+        y = torch.cat([x_h, x_w], dim=2)
+        y = self.conv1(y)
+        y = self.bn1(y)
+        y = self.act(y)
+        x_h, x_w = torch.split(y, [h, w], dim=2)
+        x_w = x_w.permute(0, 1, 3, 2)
+        a_h = self.conv_h(x_h).sigmoid()
+        a_w = self.conv_w(x_w).sigmoid()
+        out = identity * a_w * a_h
+        return out
+
+
+
+# 标准卷积层 + BAM
+class ASBAM(nn.Module):
+    # Standard convolution
+    def __init__(self, c1, ratio):  # ch_in, ch_out, kernel, stride, padding, groups
+        super(ASBAM, self).__init__()
+        self.sa = SpatialAttention(c1, AS=False)
+
+    def forward(self, x):
+        x = self.sa(x)
+        return x
+
+
+class CHWABlock(nn.Module):
+    def __init__(self, c1, c2, ratio=32):
+        super(CHWABlock, self).__init__()
+        self.channel = ChannelAttention(c1, ratio, AS=False)
+        self.coordinate = CABlock(c1, c2, ratio)
+
+    def forward(self, x):
+        # 通道注意力
+        x = self.channel(x)
+        # 坐标注意力
+        x = self.coordinate(x)
+        return x

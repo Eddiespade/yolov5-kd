@@ -12,6 +12,36 @@ from models.common import Conv
 from utils.downloads import attempt_download
 
 
+class HookTool:
+    def __init__(self):
+        self.fea = None
+
+    def hook_fun(self, module, fea_in, fea_out):
+        self.fea = fea_out
+
+
+def get_feas_by_hook(model):
+    fea_hooks = []
+    for i in [2, 4, 6, 9, 13, 17, 20, 23]:
+        m = model.model[i]
+        cur_hook = HookTool()
+        m.register_forward_hook(cur_hook.hook_fun)
+        fea_hooks.append(cur_hook)
+
+    return fea_hooks
+
+
+def get_t_feas_by_hook(model):
+    fea_hooks = []
+    for i in [3, 6, 9, 13, 18, 23, 27, 31]:
+        m = model.model[i]
+        cur_hook = HookTool()
+        m.register_forward_hook(cur_hook.hook_fun)
+        fea_hooks.append(cur_hook)
+
+    return fea_hooks
+
+
 class CrossConv(nn.Module):
     # Cross Convolution Downsample
     def __init__(self, c1, c2, k=3, s=1, g=1, e=1.0, shortcut=False):

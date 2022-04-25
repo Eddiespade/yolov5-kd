@@ -287,10 +287,26 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             c2 = ch[f] * args[0] ** 2
         elif m is Expand:
             c2 = ch[f] // args[0] ** 2
-        elif m is SE:
+        elif m is SELayer:
             channel, re = args[0], args[1]
             channel = make_divisible(channel * gw, 8) if channel != no else channel
             args = [channel, re]
+        elif m is CABlock:
+            channel, re = args[0], args[1]
+            channel = make_divisible(channel * gw, 8) if channel != no else channel
+            args = [channel, channel, re]
+        elif m is ASCBAM:
+            channel, re = args[0], args[1]
+            channel = make_divisible(channel * gw, 8) if channel != no else channel
+            args = [channel, re]
+        elif m is ASBAM:
+            channel, re = args[0], args[1]
+            channel = make_divisible(channel * gw, 8) if channel != no else channel
+            args = [channel, re]
+        elif m is CHWABlock:
+            channel, re = args[0], args[1]
+            channel = make_divisible(channel * gw, 8) if channel != no else channel
+            args = [channel, channel, re]
         else:
             c2 = ch[f]
 
