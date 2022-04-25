@@ -2,9 +2,15 @@
 
 一些碎碎念： 3050Ti的算力太差了，yolov5s的 batch最大设为8，yolov5m的 batch最大设为4。无语子
 
+
+
+## 更新日志
+- 2022/4/25 改进了教师网络模型，在去年V5.0版本上新增了 1*1卷积，以适应创新点
+- 2022/4/24 在yolov5 v6.0版本上搭建好了 知识蒸馏框架
+
 --------------
-### 调整一: 关闭了 **wandb** 
- 1. `utils/loggers/wandb/wandb_utils.py`
+## 调整一: 关闭了 **wandb** 
+### 1. `utils/loggers/wandb/wandb_utils.py`
 ```python
 try:
     import wandb
@@ -16,7 +22,7 @@ except (ImportError, AssertionError):
 # 修改为
 wandb = None
 ```
- 2. `utils/loggers/__init__.py`
+### 2. `utils/loggers/__init__.py`
 ```python
 try:
     import wandb
@@ -35,8 +41,8 @@ except (ImportError, AssertionError):
 # 修改为
 wandb = None
 ```
-### 调整二: 在train.py的基础上增加了kd框架，名为：train_kd.py
- 1. 增加默认参数的设定
+## 调整二: 在train.py的基础上增加了kd框架，名为：train_kd.py
+### 1. 增加默认参数的设定
 ```python
 # 是否使用知识蒸馏
 parser.add_argument('--kd', action='store_true', default=True, help='cache images for faster training')
@@ -48,7 +54,7 @@ parser.add_argument('--kd_loss_selected', type=str, default='l2', help='using kl
 # 如果使用的kl计算损失，则需要指定温度temperature
 parser.add_argument('--temperature', type=int, default=20, help='temperature in distilling training')
 ```
- 2. 在训练流程中添加kd
+### 2. 在训练流程中添加kd
 ```python
 # 在使用的hyp.yaml文件中添加 计算kd损失的时候会用到的参数
 giou: 0.05
@@ -120,7 +126,7 @@ kd: 1.0
 
 ```
 
- 3. 新增损失函数的计算
+### 3. 新增损失函数的计算
 ```python
 def compute_kd_output_loss(pred, teacher_pred, model, kd_loss_selected="l2", temperature=20, reg_norm=None):
     t_ft = torch.cuda.FloatTensor if teacher_pred[0].is_cuda else torch.Tensor
@@ -190,8 +196,11 @@ def at(x):
 def at_loss(x, y):
     return (at(x) - at(y)).pow(2).mean()
 ```
-### 调整二: 在大模型的基础上修改网络结构（如Yolov5m-CA） 
- 1. 添加注意力模块（添加到 models/common.py 中）
+
+------------
+
+## 调整二: 在大模型的基础上修改网络结构（如Yolov5m-CA） 
+### 1. 添加注意力模块（添加到 models/common.py 中）
 ```python
 # SE模块
 class SELayer(nn.Module):
@@ -308,7 +317,7 @@ class CABlock(nn.Module):
         out = identity * a_w * a_h
         return out
 ```
- 2. 修改网络结构（models/yolo.py）
+### 2. 修改网络结构（models/yolo.py）
 ```python
 # 在 parse_model() 函数下照着添加
     elif m is SELayer:
@@ -324,7 +333,7 @@ class CABlock(nn.Module):
         channel = make_divisible(channel * gw, 8) if channel != no else channel
         args = [channel, re]
 ```
- 3. 修改配置文件--在每个C3模块后面添加ATM（如修改 models/yolov5m.yaml）
+### 3. 修改配置文件--在每个C3模块后面添加ATM（如修改 models/yolov5m.yaml）
 ```yaml
 # YOLOv5 🚀 by Ultralytics, GPL-3.0 license
 
@@ -383,6 +392,27 @@ head:
    [[23, 27, 31], 1, Detect, [nc, anchors]],  # Detect(P3, P4, P5)
   ]
 ```
+
+## 调整三：将中间层特征图匹配上
+```python
+# 教师网络（Yolov5m）中间层特征shape        # 学生网络（Yolov5s）中间层特征shape    # diffChannel
+    torch.Size([8, 96, 160, 160])    -->     torch.Size([8, 64, 160, 160])         32   
+    torch.Size([8, 192, 80, 80])     -->     torch.Size([8, 128, 80, 80])          64
+    torch.Size([8, 384, 40, 40])     -->     torch.Size([8, 256, 40, 40])          128
+    torch.Size([8, 768, 20, 20])     -->     torch.Size([8, 512, 20, 20])          256
+    torch.Size([8, 384, 40, 40])     -->     torch.Size([8, 256, 40, 40])          128
+    torch.Size([8, 192, 80, 80])     -->     torch.Size([8, 128, 80, 80])          64
+    torch.Size([8, 384, 40, 40])     -->     torch.Size([8, 256, 40, 40])          32
+    torch.Size([8, 768, 20, 20])     -->     torch.Size([8, 512, 20, 20])          256
+```
+### 改进点
+1. 在模型前添加 1 * 1卷积
+2. 在模型后添加 1 * 1卷积
+3. 可在教师网络上添加
+4. 亦可在学生网络上添加
+
+针对上述改进需要分别进行实验对比
+
 
 
 

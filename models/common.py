@@ -50,6 +50,18 @@ class Conv(nn.Module):
         return self.act(self.conv(x))
 
 
+class Conv1_1(nn.Module):
+    # Standard convolution
+    def __init__(self, c1, c2):
+        super().__init__()
+        self.conv = nn.Conv2d(c1, c2, kernel_size=1, stride=1, padding=0, bias=False)
+        self.bn = nn.BatchNorm2d(c2)
+        self.act = nn.SiLU()
+
+    def forward(self, x):
+        return self.act(self.bn(self.conv(x)))
+
+
 class DWConv(Conv):
     # Depth-wise convolution class
     def __init__(self, c1, c2, k=1, s=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
@@ -713,7 +725,6 @@ class ASCBAM(nn.Module):
         return x
 
 
-
 # add CBAM
 class SpatialAttention(nn.Module):
     def __init__(self, in_planes, kernel_size=7, AS=False):
@@ -805,16 +816,18 @@ class h_swish(nn.Module):
 class CABlock(nn.Module):
     def __init__(self, inp, oup, reduction=32):
         super(CABlock, self).__init__()
+        self.conv_match = nn.Conv2d(inp, oup, kernel_size=1, stride=1, padding=0)
         self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
         self.pool_w = nn.AdaptiveAvgPool2d((1, None))
-        mip = max(8, inp // reduction)
-        self.conv1 = nn.Conv2d(inp, mip, kernel_size=1, stride=1, padding=0)
+        mip = max(8, oup // reduction)
+        self.conv1 = nn.Conv2d(oup, mip, kernel_size=1, stride=1, padding=0)
         self.bn1 = nn.BatchNorm2d(mip)
         self.act = h_swish()
         self.conv_h = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
         self.conv_w = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x):
+        x = self.conv_match(x)
         identity = x
         n, c, h, w = x.size()
         x_h = self.pool_h(x)
@@ -829,7 +842,6 @@ class CABlock(nn.Module):
         a_w = self.conv_w(x_w).sigmoid()
         out = identity * a_w * a_h
         return out
-
 
 
 # 标准卷积层 + BAM

@@ -39,7 +39,7 @@ if str(ROOT) not in sys.path:
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
 import val  # for end-of-epoch mAP
-from models.experimental import attempt_load
+from models.experimental import attempt_load, get_feas_by_hook, get_t_feas_by_hook
 from models.yolo import Model
 from utils.autoanchor import check_anchors
 from utils.autobatch import check_train_batch_size
@@ -346,7 +346,11 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
             # Forward
             with amp.autocast(enabled=cuda):
+                s_f = get_t_feas_by_hook(model)
                 pred = model(imgs)  # forward
+
+                for i in range(len(s_f)):
+                    print(s_f[i].fea.shape)
                 loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
                 if RANK != -1:
                     loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
@@ -475,7 +479,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default=ROOT / '', help='initial weights path')
-    parser.add_argument('--cfg', type=str, default=ROOT / 'models/yolov5s.yaml', help='model.yaml path')
+    parser.add_argument('--cfg', type=str, default=ROOT / 'models/yolov5m-ca-11.yaml', help='model.yaml path')
     parser.add_argument('--data', type=str, default=ROOT / 'data/VOC.yaml', help='dataset.yaml path')
     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-med.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=300)
