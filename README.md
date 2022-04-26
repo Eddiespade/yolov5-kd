@@ -6,11 +6,17 @@
 
 
 ## 更新日志
+- 2022/4/26 更新了注意力模块，使得其能通过传参的形式，自适应地生成：正常的注意力模块/先降维再注意力/先注意力再降维 的功能
 - 2022/4/25 改进了教师网络模型，在去年V5.0版本上新增了 1*1卷积，以适应创新点
 - 2022/4/24 在yolov5 v6.0版本上搭建好了 知识蒸馏框架
 
 ## 关于参数量
-YOLOv5m-ca-11 summary: 489 layers, 23803953 parameters, 23803953 gradients
+
+|     Model Name        | layers | parameters |  gradients |
+|     -----------       | ------ | ---------- | ---------- |
+|     YOLOv5m-ca        |   457  |  23374281  |  23374281  |
+|     YOLOv5m-ca-11     |   489  |  23803953  |  23803953  |
+| YOLOv5m-ca-11_reverse |   489  |  24270793  |  24270793  |
 
 --------------
 ## 调整一: 关闭了 **wandb** 
@@ -208,15 +214,23 @@ def at_loss(x, y):
 ```python
 # SE模块
 class SELayer(nn.Module):
-    def __init__(self, c1, r=16):
+    def __init__(self, inp, oup, r=16, need11=False, reverse=False):
         super(SELayer, self).__init__()
+        self.need11 = need11
+        self.reverse = reverse
+        true_oup = inp
+        if self.need11 and not self.reverse:
+            true_oup = oup
+        self.conv_match = nn.Conv2d(inp, oup, kernel_size=1, stride=1, padding=0)
         self.avgpool = nn.AdaptiveAvgPool2d(1)
-        self.l1 = nn.Linear(c1, c1 // r, bias=False)
+        self.l1 = nn.Linear(true_oup, true_oup // r, bias=False)
         self.relu = nn.ReLU(inplace=True)
-        self.l2 = nn.Linear(c1 // r, c1, bias=False)
+        self.l2 = nn.Linear(true_oup // r, true_oup, bias=False)
         self.sig = nn.Sigmoid()
 
     def forward(self, x):
+        if self.need11 and not self.reverse:
+            x = self.conv_match(x)
         b, c, _, _ = x.size()
         y = self.avgpool(x).view(b, c)
         y = self.l1(y)
@@ -224,22 +238,33 @@ class SELayer(nn.Module):
         y = self.l2(y)
         y = self.sig(y)
         y = y.view(b, c, 1, 1)
-        return x * y.expand_as(x)
+        out = x * y.expand_as(x)
+        if self.need11 and self.reverse:
+            out = self.conv_match(out)
+        return out
 ```
 ```python
 # CBAM模块
-# 标准卷积层 + CBAM
 class ASCBAM(nn.Module):
     # Standard convolution
-    def __init__(self, c1, ratio):  # ch_in, ch_out, kernel, stride, padding, groups
+    def __init__(self, inp, oup, ratio=4, need11=False, reverse=False):  # ch_in, ch_out, kernel, stride, padding, groups
         super(ASCBAM, self).__init__()
-        self.ca = ChannelAttention(c1, ratio, AS=False)
-        self.sa = SpatialAttention(c1, AS=False)
+        self.need11 = need11
+        self.reverse = reverse
+        true_oup = inp
+        if self.need11 and not self.reverse:
+            true_oup = oup
+        self.conv_match = nn.Conv2d(inp, oup, kernel_size=1, stride=1, padding=0)
+        self.ca = ChannelAttention(true_oup, ratio, AS=False)
+        self.sa = SpatialAttention(true_oup, AS=False)
 
     def forward(self, x):
-        x = self.sa(self.ca(x))
-        return x
-
+        if self.need11 and not self.reverse:
+            x = self.conv_match(x)
+        out = self.sa(self.ca(x))
+        if self.need11 and self.reverse:
+            out = self.conv_match(out)
+        return out
 
 
 # add CBAM
@@ -294,18 +319,26 @@ class ChannelAttention(nn.Module):
 ```python
 # CA模块
 class CABlock(nn.Module):
-    def __init__(self, inp, oup, reduction=32):
+    def __init__(self, inp, oup, reduction=32, need11=False, reverse=False):
         super(CABlock, self).__init__()
+        self.need11 = need11
+        self.reverse = reverse
+        true_oup = inp
+        if self.need11 and not self.reverse:
+            true_oup = oup
+        self.conv_match = nn.Conv2d(inp, oup, kernel_size=1, stride=1, padding=0)
         self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
         self.pool_w = nn.AdaptiveAvgPool2d((1, None))
-        mip = max(8, inp // reduction)
-        self.conv1 = nn.Conv2d(inp, mip, kernel_size=1, stride=1, padding=0)
+        mip = max(8, true_oup // reduction)
+        self.conv1 = nn.Conv2d(true_oup, mip, kernel_size=1, stride=1, padding=0)
         self.bn1 = nn.BatchNorm2d(mip)
         self.act = h_swish()
-        self.conv_h = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
-        self.conv_w = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        self.conv_h = nn.Conv2d(mip, true_oup, kernel_size=1, stride=1, padding=0)
+        self.conv_w = nn.Conv2d(mip, true_oup, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x):
+        if self.need11 and not self.reverse:
+            x = self.conv_match(x)
         identity = x
         n, c, h, w = x.size()
         x_h = self.pool_h(x)
@@ -319,23 +352,25 @@ class CABlock(nn.Module):
         a_h = self.conv_h(x_h).sigmoid()
         a_w = self.conv_w(x_w).sigmoid()
         out = identity * a_w * a_h
+        if self.need11 and self.reverse:
+            out = self.conv_match(out)
         return out
 ```
 ### 2. 修改网络结构（models/yolo.py）
 ```python
 # 在 parse_model() 函数下照着添加
     elif m is SELayer:
-        channel, re = args[0], args[1]
+        channel = args[0]
         channel = make_divisible(channel * gw, 8) if channel != no else channel
-        args = [channel, re]
+        args = [channel, args[0] // 2, *args[1:]]
     elif m is CABlock:
-        channel, re = args[0], args[1]
+        channel = args[0]
         channel = make_divisible(channel * gw, 8) if channel != no else channel
-        args = [channel, channel, re]
+        args = [channel, args[0] // 2, *args[1:]]
     elif m is ASCBAM:
-        channel, re = args[0], args[1]
+        channel = args[0]
         channel = make_divisible(channel * gw, 8) if channel != no else channel
-        args = [channel, re]
+        args = [channel, args[0] // 2, *args[1:]]
 ```
 ### 3. 修改配置文件--在每个C3模块后面添加ATM（如修改 models/yolov5m.yaml）
 ```yaml
