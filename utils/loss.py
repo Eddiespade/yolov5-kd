@@ -326,10 +326,11 @@ def compute_kd_output_loss(pred, teacher_pred, model, kd_loss_selected="l2", tem
     return mkdloss
 
 
+def ft(x):
+    return F.normalize(x.pow(2).mean(2).mean(2).view(x.size(0), -1))
+
+
 def at(x):
-    # mc = x.mean(3, keepdim=True).mean(2, keepdim=True)
-    # Mc = mc.sigmoid()
-    # x = torch.mul(Mc, x)
     return F.normalize(x.pow(2).mean(1).view(x.size(0), -1))
 
 

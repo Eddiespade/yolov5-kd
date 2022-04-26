@@ -11,12 +11,21 @@
 - 2022/4/24 在yolov5 v6.0版本上搭建好了 知识蒸馏框架
 
 ## 关于参数量
+### 预训练的教师网络
+|     Model Name        | layers | parameters |  gradients |  GFLOPs  |
+|     -----------       | ------ | ---------- | ---------- | -------- |
+|       YOLOv5m         |   369  |  20948097  |  20948097  |   48.3   |
+|     YOLOv5m-ca        |   457  |  23374281  |  23374281  |   48.3   |
+|     YOLOv5m-ca-11     |   489  |  23803953  |  23803953  |   48.3   |
+| YOLOv5m-ca-11_reverse |   489  |  24270793  |  24270793  |   48.3   |
 
-|     Model Name        | layers | parameters |  gradients |
-|     -----------       | ------ | ---------- | ---------- |
-|     YOLOv5m-ca        |   457  |  23374281  |  23374281  |
-|     YOLOv5m-ca-11     |   489  |  23803953  |  23803953  |
-| YOLOv5m-ca-11_reverse |   489  |  24270793  |  24270793  |
+### 学生网络
+|     Model Name        | layers | parameters |  gradients |  GFLOPs  |
+|     -----------       | ------ | ---------- | ---------- | -------- |
+|       YOLOv5s         |   270  |   7073569  |   7073569  |   16.0   |
+|     YOLOv5m-s         |   457  |  23374281  |  23374281  |   48.3   |
+|     YOLOv5m-ca-11     |   489  |  23803953  |  23803953  |   48.3   |
+| YOLOv5m-ca-11_reverse |   489  |  24270793  |  24270793  |   48.3   |
 
 --------------
 ## 调整一: 关闭了 **wandb** 
@@ -196,10 +205,12 @@ def compute_kd_output_loss(pred, teacher_pred, model, kd_loss_selected="l2", tem
     return mkdloss
 
 
+
+def ft(x):
+    return F.normalize(x.pow(2).mean(2).mean(2).view(x.size(0), -1))
+
+
 def at(x):
-    # mc = x.mean(3, keepdim=True).mean(2, keepdim=True)
-    # Mc = mc.sigmoid()
-    # x = torch.mul(Mc, x)
     return F.normalize(x.pow(2).mean(1).view(x.size(0), -1))
 
 
