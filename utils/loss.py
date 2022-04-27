@@ -334,6 +334,12 @@ def at(x):
     return F.normalize(x.pow(2).mean(1).view(x.size(0), -1))
 
 
+def ft_loss(x, y):
+    # 可以修改度量函数（如余弦相似度）
+    # cosin = torch.cosine_similarity(ft(x), ft(y))[0]
+    return (at(x) - at(y)).pow(2).mean() + (ft(x) - ft(y)).pow(2).mean()
+
+
 def at_loss(x, y):
     return (at(x) - at(y)).pow(2).mean()
 

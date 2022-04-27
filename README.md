@@ -6,6 +6,7 @@
 
 
 ## 更新日志
+- 2022/4/27 修改了Conv1_1的接受参数形式，为了匹配教师网络和学生网络的通道数，在学生网络（s）中添加了多个1 x 1 卷积
 - 2022/4/26 更新了注意力模块，使得其能通过传参的形式，自适应地生成：正常的注意力模块/先降维再注意力/先注意力再降维 的功能
 - 2022/4/25 改进了教师网络模型，在去年V5.0版本上新增了 1*1卷积，以适应创新点
 - 2022/4/24 在yolov5 v6.0版本上搭建好了 知识蒸馏框架
@@ -15,15 +16,15 @@
 |     Model Name        | layers | parameters |  gradients |  GFLOPs  |
 |     -----------       | ------ | ---------- | ---------- | -------- |
 |       YOLOv5m         |   369  |  20948097  |  20948097  |   48.3   |
-|     YOLOv5m-ca        |   457  |  23374281  |  23374281  |   48.3   |
-|     YOLOv5m-ca-11     |   489  |  23803953  |  23803953  |   48.3   |
-| YOLOv5m-ca-11_reverse |   489  |  24270793  |  24270793  |   48.3   |
+|     YOLOv5m-ca        |   457  |  23374281  |  23374281  |          |
+|     YOLOv5m-ca-11     |   489  |  23803953  |  23803953  |          |
+| YOLOv5m-ca-11_reverse |   489  |  24270793  |  24270793  |          |
 
 ### 学生网络
 |     Model Name        | layers | parameters |  gradients |  GFLOPs  |
 |     -----------       | ------ | ---------- | ---------- | -------- |
 |       YOLOv5s         |   270  |   7073569  |   7073569  |   16.0   |
-|     YOLOv5m-s         |   457  |  23374281  |  23374281  |   48.3   |
+|     YOLOv5m-s         |   334  |   9357409  |   9357409  |   21.1   |
 |     YOLOv5m-ca-11     |   489  |  23803953  |  23803953  |   48.3   |
 | YOLOv5m-ca-11_reverse |   489  |  24270793  |  24270793  |   48.3   |
 
@@ -377,6 +378,8 @@ class CABlock(nn.Module):
 ### 2. 修改网络结构（models/yolo.py）
 ```python
 # 在 parse_model() 函数下照着添加
+    elif m is Conv1_1:
+        args = [args[0], args[1]]
     elif m is SELayer:
         channel = args[0]
         channel = make_divisible(channel * gw, 8) if channel != no else channel
