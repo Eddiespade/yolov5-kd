@@ -217,6 +217,13 @@ def at(x):
 def at_loss(x, y):
     return (at(x) - at(y)).pow(2).mean()
 ```
+### 4. 修改了模型的保存方式
+```python
+# 原
+'model': deepcopy(de_parallel(model)).half(),
+# 现
+'model': model.state_dict(),
+```
 
 ------------
 
