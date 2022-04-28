@@ -374,6 +374,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 del s_f, t_f
 
                 loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
+
                 # kd
                 if opt.kd:
                     kdloss = compute_kd_output_loss(
@@ -382,7 +383,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     kdloss = 0
                 del teacher_pred
                 loss += opt.alpha * kdloss + opt.beta * atloss
-                loss_items[-1] = loss
+                kdloss_items = kdloss.detach()
+                atloss_items = atloss.detach()
 
                 if RANK != -1:
                     loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
@@ -404,8 +406,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             # Log
             if RANK in (-1, 0):
                 mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
-                mkdloss = (mkdloss * i + kdloss) / (i + 1)  # update mean losses
-                matloss = (matloss * i + atloss) / (i + 1)  # update mean losses
+                mkdloss = (mkdloss * i + kdloss_items) / (i + 1)  # update mean losses
+                matloss = (matloss * i + atloss_items) / (i + 1)  # update mean losses
                 mem = f'{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}G'  # (GB)
                 pbar.set_description(('%10s' * 2 + '%10.4g' * 7) %
                                      (f'{epoch}/{epochs - 1}', mem, *mloss, mkdloss, matloss, targets.shape[0], imgs.shape[-1]))
@@ -447,7 +449,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 ckpt = {
                     'epoch': epoch,
                     'best_fitness': best_fitness,
-                    'model': deepcopy(de_parallel(model)).half(),
+                    'model': model.state_dict(),
                     'ema': deepcopy(ema.ema).half(),
                     'updates': ema.updates,
                     'optimizer': optimizer.state_dict(),
@@ -514,19 +516,19 @@ def parse_opt(known=False):
     parser = argparse.ArgumentParser()
     # ---------------------------------------- kd parser ---------------------------------------
     parser.add_argument('--kd', action='store_true', default=True, help='cache images for faster training')
-    parser.add_argument('--teacher_weight', type=str, default='runs/train/m3/weights/last.pt',
+    parser.add_argument('--teacher_weight', type=str, default='runs/train/yolov5m/weights/best.pt',
                         help='initial teacher_weight path')
     parser.add_argument('--kd_loss_selected', type=str, default='l2', help='using kl/l2 loss in distillation')
     parser.add_argument('--temperature', type=int, default=20, help='temperature in distilling training')
-    parser.add_argument('--alpha', default=0, type=float)
-    parser.add_argument('--beta', default=1e+4, type=float)
+    parser.add_argument('--alpha', default=1, type=float)
+    parser.add_argument('--beta', default=1e+3, type=float)
     # -------------------------------------- source parser -------------------------------------
     parser.add_argument('--weights', type=str, default=ROOT / '', help='initial weights path')
     parser.add_argument('--cfg', type=str, default=ROOT / 'models/yolov5s.yaml', help='model.yaml path')
     parser.add_argument('--data', type=str, default=ROOT / 'data/VOC.yaml', help='dataset.yaml path')
     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-med.yaml', help='hyperparameters path')
-    parser.add_argument('--epochs', type=int, default=10)
-    parser.add_argument('--batch-size', type=int, default=4, help='total batch size for all GPUs, -1 for autobatch')
+    parser.add_argument('--epochs', type=int, default=20)
+    parser.add_argument('--batch-size', type=int, default=8, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='train, val image size (pixels)')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')

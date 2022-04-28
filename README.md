@@ -130,7 +130,8 @@ kd: 1.0
             kdloss = 0
         del teacher_pred
         loss += opt.alpha * kdloss + opt.beta * atloss
-        loss_items[-1] = loss
+        kdloss_items = kdloss.detach()
+        atloss_items = atloss.detach()
 
         if RANK != -1:
             loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
@@ -139,8 +140,8 @@ kd: 1.0
 ```
 ```python
     # 更新 mkdloss 日志
-    mkdloss = (mkdloss * i + kdloss) / (i + 1)  # update mean losses
-    matloss = (matloss * i + atloss) / (i + 1)  # update mean losses
+    mkdloss = (mkdloss * i + kdloss_items) / (i + 1)  # update mean losses
+    matloss = (matloss * i + atloss_items) / (i + 1)  # update mean losses
     pbar.set_description(('%10s' * 2 + '%10.4g' * 7) %
                          (f'{epoch}/{epochs - 1}', mem, *mloss, mkdloss, matloss, targets.shape[0], imgs.shape[-1]))
 
