@@ -516,7 +516,7 @@ def parse_opt(known=False):
     parser = argparse.ArgumentParser()
     # ---------------------------------------- kd parser ---------------------------------------
     parser.add_argument('--kd', action='store_true', default=True, help='cache images for faster training')
-    parser.add_argument('--teacher_weight', type=str, default='runs/train/yolov5m/weights/best.pt',
+    parser.add_argument('--teacher_weight', type=str, default='runs/train/yolov5m-ca-11_reverse/weights/best.pt',
                         help='initial teacher_weight path')
     parser.add_argument('--kd_loss_selected', type=str, default='l2', help='using kl/l2 loss in distillation')
     parser.add_argument('--temperature', type=int, default=20, help='temperature in distilling training')
