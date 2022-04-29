@@ -518,7 +518,7 @@ def parse_opt(known=False):
     parser.add_argument('--kd_loss_selected', type=str, default='l2', help='using kl/l2 loss in distillation')
     parser.add_argument('--temperature', type=int, default=20, help='temperature in distilling training')
     parser.add_argument('--alpha', default=1, type=float)
-    parser.add_argument('--beta', default=1e+3, type=float)
+    parser.add_argument('--beta', default=1, type=float)
     # -------------------------------------- source parser -------------------------------------
     parser.add_argument('--weights', type=str, default=ROOT / '', help='initial weights path')
     parser.add_argument('--cfg', type=str, default=ROOT / 'models/yolov5s.yaml', help='model.yaml path')
