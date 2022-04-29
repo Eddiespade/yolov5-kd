@@ -52,7 +52,7 @@ from utils.general import (LOGGER, check_dataset, check_file, check_git_status, 
                            one_cycle, print_args, print_mutation, strip_optimizer)
 from utils.loggers import Loggers
 from utils.loggers.wandb.wandb_utils import check_wandb_resume
-from utils.loss import ComputeLoss, compute_kd_output_loss, feature_loss, feature_at_loss, feature_ft_loss
+from utils.loss import ComputeLoss, compute_kd_output_loss, feature_loss, wat_loss
 from utils.metrics import fitness
 from utils.plots import plot_evolve, plot_labels
 from utils.torch_utils import EarlyStopping, ModelEMA, de_parallel, select_device, torch_distributed_zero_first
@@ -363,15 +363,12 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 pred = model(imgs)  # forward
 
                 if opt.kd:
-                    atloss = torch.zeros(1, device=device)
                     with torch.no_grad():
                         t_f = get_t_feas_by_hook(teacher_model)
                         teacher_pred = teacher_model(imgs)
 
-                    # for i in range(len(t_f)):
-                    #     # atloss += at_loss(s_f[i].fea, t_f[i].fea)
-                    #     atloss = ft_loss(s_f[i].fea, t_f[i].fea)
-                    ftloss, ftloss_items = feature_loss(s_f, t_f)
+                    # ftloss, ftloss_items = feature_loss(s_f, t_f, at=True, ft=True)
+                    ftloss, ftloss_items = wat_loss(s_f, t_f)
                 del s_f, t_f
 
                 loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size

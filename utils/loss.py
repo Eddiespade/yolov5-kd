@@ -326,33 +326,30 @@ def compute_kd_output_loss(pred, teacher_pred, model, kd_loss_selected="l2", tem
     return mkdloss
 
 
-def feature_loss(x, y):
+def feature_loss(x, y, at=True, ft=True):
     device = x[0].fea.device
     atloss = torch.zeros(1, device=device)
     ftloss = torch.zeros(1, device=device)
     for i in range(len(x)):
-        atloss += at_loss(x[i].fea, y[i].fea)
-        ftloss += ft_loss(x[i].fea, y[i].fea)
+        if at:
+            atloss += at_loss(x[i].fea, y[i].fea)
+        if ft:
+            ftloss += ft_loss(x[i].fea, y[i].fea)
     return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
 
 
-def feature_at_loss(x, y):
+def wat_loss(x, y):
     device = x[0].fea.device
+    w = torch.zeros(8, device=device)
     atloss = torch.zeros(1, device=device)
     ftloss = torch.zeros(1, device=device)
     for i in range(len(x)):
-        atloss += at_loss(x[i].fea, y[i].fea)
-        # ftloss += ft_loss(x[i].fea, y[i].fea)
-    return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
+        w[i] = ft_loss(x[i].fea, y[i].fea)
+    w = F.softmax(w, dim=0)
 
-
-def feature_ft_loss(x, y):
-    device = x[0].fea.device
-    atloss = torch.zeros(1, device=device)
-    ftloss = torch.zeros(1, device=device)
+    # 计算权重
     for i in range(len(x)):
-        # atloss += at_loss(x[i].fea, y[i].fea)
-        ftloss += ft_loss(x[i].fea, y[i].fea)
+        atloss += w[i] * at_loss(x[i].fea, y[i].fea)
     return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
 
 
