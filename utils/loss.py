@@ -326,6 +326,16 @@ def compute_kd_output_loss(pred, teacher_pred, model, kd_loss_selected="l2", tem
     return mkdloss
 
 
+def fetureloss(x, y):
+    device = x[0].fea.device
+    atloss = torch.zeros(1, device=device)
+    ftloss = torch.zeros(1, device=device)
+    for i in range(len(x)):
+        atloss += at_loss(x[i].fea, y[i].fea)
+        ftloss += ft_loss(x[i].fea, y[i].fea)
+    return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
+
+
 def ft(x):
     return F.normalize(x.pow(2).mean(2).mean(2).view(x.size(0), -1))
 
@@ -337,7 +347,7 @@ def at(x):
 def ft_loss(x, y):
     # 可以修改度量函数（如余弦相似度）
     # cosin = torch.cosine_similarity(ft(x), ft(y))[0]
-    return (at(x) - at(y)).pow(2).mean() + (ft(x) - ft(y)).pow(2).mean()
+    return (ft(x) - ft(y)).pow(2).mean()
 
 
 def at_loss(x, y):

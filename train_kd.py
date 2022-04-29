@@ -52,7 +52,7 @@ from utils.general import (LOGGER, check_dataset, check_file, check_git_status, 
                            one_cycle, print_args, print_mutation, strip_optimizer)
 from utils.loggers import Loggers
 from utils.loggers.wandb.wandb_utils import check_wandb_resume
-from utils.loss import ComputeLoss, compute_kd_output_loss, at_loss, ft_loss
+from utils.loss import ComputeLoss, compute_kd_output_loss, at_loss, ft_loss, fetureloss
 from utils.metrics import fitness
 from utils.plots import plot_evolve, plot_labels
 from utils.torch_utils import EarlyStopping, ModelEMA, de_parallel, select_device, torch_distributed_zero_first
@@ -329,7 +329,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         if RANK != -1:
             train_loader.sampler.set_epoch(epoch)
         pbar = enumerate(train_loader)
-        LOGGER.info(('\n' + '%10s' * 9) % ('Epoch', 'gpu_mem', 'box', 'obj', 'cls', 'kd', 'at', 'labels', 'img_size'))
+        LOGGER.info(('\n' + '%10s' * 10) % ('Epoch', 'gpu_mem', 'box', 'obj', 'cls', 'kd', 'at', 'ft', 'labels', 'img_size'))
         if RANK in (-1, 0):
             pbar = tqdm(pbar, total=nb, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
         optimizer.zero_grad()
@@ -368,9 +368,10 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                         t_f = get_t_feas_by_hook(teacher_model)
                         teacher_pred = teacher_model(imgs)
 
-                    for i in range(len(t_f)):
-                        # atloss += at_loss(s_f[i].fea, t_f[i].fea)
-                        atloss = ft_loss(s_f[i].fea, t_f[i].fea)
+                    # for i in range(len(t_f)):
+                    #     # atloss += at_loss(s_f[i].fea, t_f[i].fea)
+                    #     atloss = ft_loss(s_f[i].fea, t_f[i].fea)
+                    ftloss, ftloss_items = fetureloss(s_f, t_f)
                 del s_f, t_f
 
                 loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
@@ -382,9 +383,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 else:
                     kdloss = 0
                 del teacher_pred
-                loss += opt.alpha * kdloss + opt.beta * atloss
-                kdloss_items = kdloss.detach()
-                atloss_items = atloss.detach()
+                loss += opt.alpha * kdloss + opt.beta * ftloss
+                kdloss_item = kdloss.detach()
 
                 if RANK != -1:
                     loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
@@ -406,11 +406,11 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             # Log
             if RANK in (-1, 0):
                 mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
-                mkdloss = (mkdloss * i + kdloss_items) / (i + 1)  # update mean losses
-                matloss = (matloss * i + atloss_items) / (i + 1)  # update mean losses
+                mkdloss = (mkdloss * i + kdloss_item) / (i + 1)  # update mean losses
+                mftloss = (matloss * i + ftloss_items) / (i + 1)  # update mean losses
                 mem = f'{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}G'  # (GB)
-                pbar.set_description(('%10s' * 2 + '%10.4g' * 7) %
-                                     (f'{epoch}/{epochs - 1}', mem, *mloss, mkdloss, matloss, targets.shape[0], imgs.shape[-1]))
+                pbar.set_description(('%10s' * 2 + '%10.4g' * 8) %
+                                     (f'{epoch}/{epochs - 1}', mem, *mloss, mkdloss, *mftloss, targets.shape[0], imgs.shape[-1]))
                 callbacks.run('on_train_batch_end', ni, model, imgs, targets, paths, plots)
                 if callbacks.stop_training:
                     return
