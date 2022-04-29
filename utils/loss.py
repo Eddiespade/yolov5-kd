@@ -326,12 +326,32 @@ def compute_kd_output_loss(pred, teacher_pred, model, kd_loss_selected="l2", tem
     return mkdloss
 
 
-def fetureloss(x, y):
+def feature_loss(x, y):
     device = x[0].fea.device
     atloss = torch.zeros(1, device=device)
     ftloss = torch.zeros(1, device=device)
     for i in range(len(x)):
         atloss += at_loss(x[i].fea, y[i].fea)
+        ftloss += ft_loss(x[i].fea, y[i].fea)
+    return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
+
+
+def feature_at_loss(x, y):
+    device = x[0].fea.device
+    atloss = torch.zeros(1, device=device)
+    ftloss = torch.zeros(1, device=device)
+    for i in range(len(x)):
+        atloss += at_loss(x[i].fea, y[i].fea)
+        # ftloss += ft_loss(x[i].fea, y[i].fea)
+    return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
+
+
+def feature_ft_loss(x, y):
+    device = x[0].fea.device
+    atloss = torch.zeros(1, device=device)
+    ftloss = torch.zeros(1, device=device)
+    for i in range(len(x)):
+        # atloss += at_loss(x[i].fea, y[i].fea)
         ftloss += ft_loss(x[i].fea, y[i].fea)
     return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
 
