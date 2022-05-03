@@ -52,7 +52,7 @@ from utils.general import (LOGGER, check_dataset, check_file, check_git_status, 
                            one_cycle, print_args, print_mutation, strip_optimizer)
 from utils.loggers import Loggers
 from utils.loggers.wandb.wandb_utils import check_wandb_resume
-from utils.loss import ComputeLoss, compute_kd_output_loss, feature_loss, wat_loss
+from utils.loss import ComputeLoss, compute_kd_output_loss, feature_loss, wat_loss, EFTLoss
 from utils.metrics import fitness
 from utils.plots import plot_evolve, plot_labels
 from utils.torch_utils import EarlyStopping, ModelEMA, de_parallel, select_device, torch_distributed_zero_first
@@ -304,6 +304,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     scaler = amp.GradScaler(enabled=cuda)
     stopper = EarlyStopping(patience=opt.patience)
     compute_loss = ComputeLoss(model)  # init loss class
+    eat_loss = EFTLoss()
     callbacks.run('on_train_start')
     LOGGER.info(f'Image sizes {imgsz} train, {imgsz} val\n'
                 f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
@@ -367,8 +368,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                         t_f = get_t_feas_by_hook(teacher_model)
                         teacher_pred = teacher_model(imgs)
 
-                    ftloss, ftloss_items = feature_loss(s_f, t_f, at=True, ft=False)
-                    # ftloss, ftloss_items = wat_loss(s_f, t_f)
+                    ftloss, ftloss_items = eat_loss(t_f, s_f)
                 del s_f, t_f
 
                 loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
@@ -513,7 +513,7 @@ def parse_opt(known=False):
     parser = argparse.ArgumentParser()
     # ---------------------------------------- kd parser ---------------------------------------
     parser.add_argument('--kd', action='store_true', default=True, help='cache images for faster training')
-    parser.add_argument('--teacher_weight', type=str, default='runs/train/yolov5m-ca/weights/best.pt',
+    parser.add_argument('--teacher_weight', type=str, default='runs/train/yolov5l2/weights/best.pt',
                         help='initial teacher_weight path')
     parser.add_argument('--kd_loss_selected', type=str, default='l2', help='using kl/l2 loss in distillation')
     parser.add_argument('--temperature', type=int, default=20, help='temperature in distilling training')
@@ -525,7 +525,7 @@ def parse_opt(known=False):
     parser.add_argument('--data', type=str, default=ROOT / 'data/VOC.yaml', help='dataset.yaml path')
     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-med.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--batch-size', type=int, default=8, help='total batch size for all GPUs, -1 for autobatch')
+    parser.add_argument('--batch-size', type=int, default=4, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='train, val image size (pixels)')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
@@ -544,7 +544,7 @@ def parse_opt(known=False):
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     parser.add_argument('--workers', type=int, default=8, help='max dataloader workers (per RANK in DDP mode)')
     parser.add_argument('--project', default=ROOT / 'runs/train', help='save to project/name')
-    parser.add_argument('--name', default='m-s-kd', help='save to project/name')
+    parser.add_argument('--name', default='l-s-kd-eft', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
     parser.add_argument('--cos-lr', action='store_true', help='cosine LR scheduler')

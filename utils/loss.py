@@ -326,6 +326,31 @@ def compute_kd_output_loss(pred, teacher_pred, model, kd_loss_selected="l2", tem
     return mkdloss
 
 
+class EFTLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.s_t_pair = [64, 128, 256, 512, 256, 128, 256, 512]
+        self.linears = nn.ModuleList([conv1x1_bn(s, "cuda:0") for s in self.s_t_pair])
+
+    def forward(self, t_f, s_f):
+        device = t_f[0].fea.device
+        atloss = torch.zeros(1, device=device)
+        ftloss = torch.zeros(1, device=device)
+        for i in range(len(t_f)):
+            atloss += at_loss(t_f[i].fea, s_f[i].fea)
+            s_f[i].fea = self.linears[i](s_f[i].fea)
+            ftloss += ft_loss(t_f[i].fea, s_f[i].fea)
+        return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
+
+
+def conv1x1_bn(in_channel, device):
+    return nn.Sequential(
+        nn.Conv2d(in_channel, 2 * in_channel, kernel_size=1, stride=1, padding=0, bias=False, device=device),
+        nn.BatchNorm2d(2 * in_channel, device=device),
+        nn.ReLU(inplace=True)
+    )
+
+
 def feature_loss(x, y, at=True, ft=True):
     device = x[0].fea.device
     atloss = torch.zeros(1, device=device)
@@ -354,7 +379,7 @@ def wat_loss(x, y):
 
 
 def ft(x):
-    return F.normalize(x.pow(2).mean(2).mean(2).view(x.size(0), -1))
+    return x.pow(2).mean(2).mean(2).view(x.size(0), -1)
 
 
 def at(x):
@@ -369,18 +394,6 @@ def ft_loss(x, y):
 
 def at_loss(x, y):
     return (at(x) - at(y)).pow(2).mean()
-
-
-class Feature_Adap(nn.Module):
-    def __init__(self, input_channel, output_channel, kernel_size=3, padding=1):
-        super(Feature_Adap, self).__init__()
-        self.conv1 = nn.Conv2d(input_channel, output_channel, kernel_size=kernel_size, padding=padding)
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.relu(x)
-        return x
 
 
 class CSL(nn.Module):
