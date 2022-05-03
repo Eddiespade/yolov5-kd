@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from models.common import h_swish
 from utils.metrics import bbox_iou
 from utils.torch_utils import de_parallel
 
@@ -326,20 +327,58 @@ def compute_kd_output_loss(pred, teacher_pred, model, kd_loss_selected="l2", tem
     return mkdloss
 
 
+class CoordAtt(nn.Module):
+    def __init__(self, inp, oup, groups=32):
+        super(CoordAtt, self).__init__()
+        self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
+        self.pool_w = nn.AdaptiveAvgPool2d((1, None))
+
+        mip = max(8, inp // groups)
+
+        self.conv1 = nn.Conv2d(inp, mip, kernel_size=1, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(mip)
+        self.conv2 = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        self.conv3 = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        self.relu = h_swish()
+
+    def forward(self, x):
+        identity = x
+        n, c, h, w = x.size()
+        x_h = self.pool_h(x)
+        x_w = self.pool_w(x).permute(0, 1, 3, 2)
+
+        y = torch.cat([x_h, x_w], dim=2)
+        y = self.conv1(y)
+        y = self.bn1(y)
+        y = self.relu(y)
+        x_h, x_w = torch.split(y, [h, w], dim=2)
+        x_w = x_w.permute(0, 1, 3, 2)
+
+        x_h = self.conv2(x_h).sigmoid()
+        x_w = self.conv3(x_w).sigmoid()
+        x_h = x_h.expand(-1, -1, h, w)
+        x_w = x_w.expand(-1, -1, h, w)
+
+        y = identity * x_w * x_h
+
+        return y
+
+
 class EFTLoss(nn.Module):
     def __init__(self):
         super().__init__()
         self.s_t_pair = [64, 128, 256, 512, 256, 128, 256, 512]
         self.linears = nn.ModuleList([conv1x1_bn(s, "cuda:0") for s in self.s_t_pair])
+        self.Ca = nn.ModuleList([CoordAtt(2 * s, 2 * s).to("cuda:0") for s in self.s_t_pair])
 
     def forward(self, t_f, s_f):
         device = t_f[0].fea.device
         atloss = torch.zeros(1, device=device)
         ftloss = torch.zeros(1, device=device)
         for i in range(len(t_f)):
+            t_f[i].fea = self.Ca[i](t_f[i].fea)
             atloss += at_loss(t_f[i].fea, s_f[i].fea)
-            s_f[i].fea = self.linears[i](s_f[i].fea)
-            ftloss += ft_loss(t_f[i].fea, s_f[i].fea)
+            # ftloss += ft_loss(t_f[i].fea, s_f[i].fea)
         return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
 
 
