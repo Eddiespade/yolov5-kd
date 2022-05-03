@@ -465,6 +465,15 @@ head:
     torch.Size([8, 192, 80, 80])     -->     torch.Size([8, 128, 80, 80])          64
     torch.Size([8, 384, 40, 40])     -->     torch.Size([8, 256, 40, 40])          32
     torch.Size([8, 768, 20, 20])     -->     torch.Size([8, 512, 20, 20])          256
+# Yolov5l:
+    torch.Size([2, 128, 160, 160])
+    torch.Size([2, 256, 80, 80])
+    torch.Size([2, 512, 40, 40])
+    torch.Size([2, 1024, 20, 20])
+    torch.Size([2, 512, 40, 40])
+    torch.Size([2, 256, 80, 80])
+    torch.Size([2, 512, 40, 40])
+    torch.Size([2, 1024, 20, 20])
 ```
 ### 改进点
 1. 在模型前添加 1 * 1卷积
