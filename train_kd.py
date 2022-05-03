@@ -52,7 +52,7 @@ from utils.general import (LOGGER, check_dataset, check_file, check_git_status, 
                            one_cycle, print_args, print_mutation, strip_optimizer)
 from utils.loggers import Loggers
 from utils.loggers.wandb.wandb_utils import check_wandb_resume
-from utils.loss import ComputeLoss, compute_kd_output_loss, feature_loss, wat_loss, EFTLoss, CDLoss
+from utils.loss import ComputeLoss, compute_kd_output_loss, feature_loss, wat_loss, EFTLoss, CDLoss, CD_DS
 from utils.metrics import fitness
 from utils.plots import plot_evolve, plot_labels
 from utils.torch_utils import EarlyStopping, ModelEMA, de_parallel, select_device, torch_distributed_zero_first
@@ -305,7 +305,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     stopper = EarlyStopping(patience=opt.patience)
     compute_loss = ComputeLoss(model)  # init loss class
     # eat_loss = EFTLoss()
-    eat_loss = CDLoss()
+    # eat_loss = CDLoss()
+    eat_loss = CD_DS()
     callbacks.run('on_train_start')
     LOGGER.info(f'Image sizes {imgsz} train, {imgsz} val\n'
                 f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
@@ -519,7 +520,7 @@ def parse_opt(known=False):
     parser.add_argument('--kd_loss_selected', type=str, default='l2', help='using kl/l2 loss in distillation')
     parser.add_argument('--temperature', type=int, default=20, help='temperature in distilling training')
     parser.add_argument('--alpha', default=1, type=float)
-    parser.add_argument('--beta', default=1, type=float)
+    parser.add_argument('--beta', default=50, type=float)
     # -------------------------------------- source parser -------------------------------------
     parser.add_argument('--weights', type=str, default=ROOT / '', help='initial weights path')
     parser.add_argument('--cfg', type=str, default=ROOT / 'models/yolov5s.yaml', help='model.yaml path')
