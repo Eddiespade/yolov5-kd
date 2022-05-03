@@ -367,8 +367,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                         t_f = get_t_feas_by_hook(teacher_model)
                         teacher_pred = teacher_model(imgs)
 
-                    # ftloss, ftloss_items = feature_loss(s_f, t_f, at=True, ft=True)
-                    ftloss, ftloss_items = wat_loss(s_f, t_f)
+                    ftloss, ftloss_items = feature_loss(s_f, t_f, at=True, ft=False)
+                    # ftloss, ftloss_items = wat_loss(s_f, t_f)
                 del s_f, t_f
 
                 loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
@@ -513,19 +513,19 @@ def parse_opt(known=False):
     parser = argparse.ArgumentParser()
     # ---------------------------------------- kd parser ---------------------------------------
     parser.add_argument('--kd', action='store_true', default=True, help='cache images for faster training')
-    parser.add_argument('--teacher_weight', type=str, default='runs/train/yolov5m-ca-11_reverse/weights/best.pt',
+    parser.add_argument('--teacher_weight', type=str, default='runs/train/yolov5m-ca/weights/best.pt',
                         help='initial teacher_weight path')
     parser.add_argument('--kd_loss_selected', type=str, default='l2', help='using kl/l2 loss in distillation')
     parser.add_argument('--temperature', type=int, default=20, help='temperature in distilling training')
     parser.add_argument('--alpha', default=1, type=float)
-    parser.add_argument('--beta', default=1, type=float)
+    parser.add_argument('--beta', default=1e+3, type=float)
     # -------------------------------------- source parser -------------------------------------
     parser.add_argument('--weights', type=str, default=ROOT / '', help='initial weights path')
     parser.add_argument('--cfg', type=str, default=ROOT / 'models/yolov5s.yaml', help='model.yaml path')
     parser.add_argument('--data', type=str, default=ROOT / 'data/VOC.yaml', help='dataset.yaml path')
     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-med.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs, -1 for autobatch')
+    parser.add_argument('--batch-size', type=int, default=8, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='train, val image size (pixels)')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
