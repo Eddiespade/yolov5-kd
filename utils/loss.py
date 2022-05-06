@@ -386,10 +386,12 @@ class EFTLoss(nn.Module):
     def __init__(self):
         super().__init__()
         self.s_t_pair = [64, 128, 256, 512, 256, 128, 256, 512]
+        self.t_s_pair = [96, 192, 384, 768, 384, 192, 384, 768]
+
         self.linears = nn.ModuleList([conv1x1_bn(s, "cuda:0") for s in self.s_t_pair])
         # self.Ca = nn.ModuleList([CoordAtt(2 * s, 2 * s).to("cuda:0") for s in self.s_t_pair])
-        self.se1 = nn.ModuleList([SE_Block(2 * s).to("cuda:0") for s in self.s_t_pair])
-        self.se2 = nn.ModuleList([SE_Block(s).to("cuda:0") for s in self.s_t_pair])
+        # self.se1 = nn.ModuleList([SE_Block(t).to("cuda:0") for t in self.t_s_pair])
+        # self.se2 = nn.ModuleList([SE_Block(s).to("cuda:0") for s in self.s_t_pair])
 
     def forward(self, t_f, s_f):
         device = t_f[0].fea.device
@@ -397,10 +399,11 @@ class EFTLoss(nn.Module):
         ftloss = torch.zeros(1, device=device)
         for i in range(len(t_f)):
             # t_f[i].fea = self.Ca[i](t_f[i].fea)
-            t_f[i].fea = self.se1[i](t_f[i].fea)
-            s_f[i].fea = self.se2[i](s_f[i].fea)
+            # t_f[i].fea = self.se1[i](t_f[i].fea)
+            # s_f[i].fea = self.se2[i](s_f[i].fea)
             atloss += at_loss(t_f[i].fea, s_f[i].fea)
-            # ftloss += ft_loss(t_f[i].fea, s_f[i].fea)
+            s_f[i].fea = self.linears[i](s_f[i].fea)
+            ftloss += ft_loss(t_f[i].fea, s_f[i].fea)
         return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
 
 
@@ -408,7 +411,7 @@ def conv1x1_bn(in_channel, device):
     return nn.Sequential(
         nn.Conv2d(in_channel, 2 * in_channel, kernel_size=1, stride=1, padding=0, bias=False, device=device),
         nn.BatchNorm2d(2 * in_channel, device=device),
-        nn.ReLU(inplace=True)
+        nn.SiLU()
     )
 
 
@@ -424,33 +427,9 @@ class CDLoss(nn.Module):
         atloss = torch.zeros(1, device=device)
         ftloss = torch.zeros(1, device=device)
         for i in range(len(t_f)):
-            atloss += at_loss(t_f[i].fea, s_f[i].fea)
             s_f[i].fea = self.linears[i](s_f[i].fea)
+            # atloss += at_loss(t_f[i].fea, s_f[i].fea)
             ftloss += ft_loss(t_f[i].fea, s_f[i].fea)
-        return atloss + 0.001 * ftloss, torch.cat((atloss, ftloss)).detach()
-
-
-# 复现Channel-wise Knowledge Distillation for Dense Prediction
-class CD_DS(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.s_t_pair = [64, 128, 256, 512, 256, 128, 256, 512]
-        self.linears = nn.ModuleList([conv1x1_bn(s, "cuda:0") for s in self.s_t_pair])
-        self.temperature = 4
-
-    def forward(self, t_f, s_f):
-        KLLoss = nn.KLDivLoss(reduction="batchmean")
-        device = t_f[0].fea.device
-        atloss = torch.zeros(1, device=device)
-        ftloss = torch.zeros(1, device=device)
-        for i in range(len(t_f)):
-            s_f[i].fea = self.linears[i](s_f[i].fea)
-            b, c, _, _ = t_f[i].fea.size()
-            t_f[i] = t_f[i].fea.view(b, c, -1)
-            s_f[i] = s_f[i].fea.view(b, c, -1)
-            ftloss += KLLoss(F.log_softmax(t_f[i] / self.temperature, dim=2), F.softmax(s_f[i] / self.temperature, dim=2)) * \
-                      (self.temperature * self.temperature / c)
-            # ftloss += ft_loss(t_f[i].fea, s_f[i].fea)
         return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
 
 
@@ -482,7 +461,7 @@ def wat_loss(x, y):
 
 
 def ft(x):
-    return x.pow(2).mean(2).mean(2).view(x.size(0), -1)
+    return F.normalize(x.pow(2).mean(2).mean(2).view(x.size(0), -1))
 
 
 def at(x):
