@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from models.common import h_swish
 from utils.metrics import bbox_iou
 from utils.torch_utils import de_parallel
 
@@ -326,6 +327,133 @@ def compute_kd_output_loss(pred, teacher_pred, model, kd_loss_selected="l2", tem
     return mkdloss
 
 
+class CoordAtt(nn.Module):
+    def __init__(self, inp, oup, groups=32):
+        super(CoordAtt, self).__init__()
+        self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
+        self.pool_w = nn.AdaptiveAvgPool2d((1, None))
+
+        mip = max(8, inp // groups)
+
+        self.conv1 = nn.Conv2d(inp, mip, kernel_size=1, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(mip)
+        self.conv2 = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        self.conv3 = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        self.relu = h_swish()
+
+    def forward(self, x):
+        identity = x
+        n, c, h, w = x.size()
+        x_h = self.pool_h(x)
+        x_w = self.pool_w(x).permute(0, 1, 3, 2)
+
+        y = torch.cat([x_h, x_w], dim=2)
+        y = self.conv1(y)
+        y = self.bn1(y)
+        y = self.relu(y)
+        x_h, x_w = torch.split(y, [h, w], dim=2)
+        x_w = x_w.permute(0, 1, 3, 2)
+
+        x_h = self.conv2(x_h).sigmoid()
+        x_w = self.conv3(x_w).sigmoid()
+        x_h = x_h.expand(-1, -1, h, w)
+        x_w = x_w.expand(-1, -1, h, w)
+
+        y = identity * x_w * x_h
+
+        return y
+
+
+class SE_Block(nn.Module):
+    def __init__(self, ch_in, reduction=16):
+        super(SE_Block, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)  # 全局自适应池化
+        self.fc = nn.Sequential(
+            nn.Linear(ch_in, ch_in // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(ch_in // reduction, ch_in, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avg_pool(x).view(b, c)  # squeeze操作
+        y = self.fc(y).view(b, c, 1, 1)  # FC获取通道注意力权重，是具有全局信息的
+        return x * y.expand_as(x)  # 注意力作用每一个通道上
+
+
+class EFTLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.s_t_pair = [64, 128, 256, 512, 256, 128, 256, 512]
+        self.linears = nn.ModuleList([conv1x1_bn(s, "cuda:0") for s in self.s_t_pair])
+        # self.Ca = nn.ModuleList([CoordAtt(2 * s, 2 * s).to("cuda:0") for s in self.s_t_pair])
+        self.se1 = nn.ModuleList([SE_Block(2 * s).to("cuda:0") for s in self.s_t_pair])
+        self.se2 = nn.ModuleList([SE_Block(s).to("cuda:0") for s in self.s_t_pair])
+
+    def forward(self, t_f, s_f):
+        device = t_f[0].fea.device
+        atloss = torch.zeros(1, device=device)
+        ftloss = torch.zeros(1, device=device)
+        for i in range(len(t_f)):
+            # t_f[i].fea = self.Ca[i](t_f[i].fea)
+            t_f[i].fea = self.se1[i](t_f[i].fea)
+            s_f[i].fea = self.se2[i](s_f[i].fea)
+            atloss += at_loss(t_f[i].fea, s_f[i].fea)
+            # ftloss += ft_loss(t_f[i].fea, s_f[i].fea)
+        return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
+
+
+def conv1x1_bn(in_channel, device):
+    return nn.Sequential(
+        nn.Conv2d(in_channel, 2 * in_channel, kernel_size=1, stride=1, padding=0, bias=False, device=device),
+        nn.BatchNorm2d(2 * in_channel, device=device),
+        nn.ReLU(inplace=True)
+    )
+
+
+# 使用 bc 拟合
+class CDLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.s_t_pair = [64, 128, 256, 512, 256, 128, 256, 512]
+        self.linears = nn.ModuleList([conv1x1_bn(s, "cuda:0") for s in self.s_t_pair])
+
+    def forward(self, t_f, s_f):
+        device = t_f[0].fea.device
+        atloss = torch.zeros(1, device=device)
+        ftloss = torch.zeros(1, device=device)
+        for i in range(len(t_f)):
+            atloss += at_loss(t_f[i].fea, s_f[i].fea)
+            s_f[i].fea = self.linears[i](s_f[i].fea)
+            ftloss += ft_loss(t_f[i].fea, s_f[i].fea)
+        return atloss + 0.001 * ftloss, torch.cat((atloss, ftloss)).detach()
+
+
+# 复现Channel-wise Knowledge Distillation for Dense Prediction
+class CD_DS(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.s_t_pair = [64, 128, 256, 512, 256, 128, 256, 512]
+        self.linears = nn.ModuleList([conv1x1_bn(s, "cuda:0") for s in self.s_t_pair])
+        self.temperature = 4
+
+    def forward(self, t_f, s_f):
+        KLLoss = nn.KLDivLoss(reduction="batchmean")
+        device = t_f[0].fea.device
+        atloss = torch.zeros(1, device=device)
+        ftloss = torch.zeros(1, device=device)
+        for i in range(len(t_f)):
+            s_f[i].fea = self.linears[i](s_f[i].fea)
+            b, c, _, _ = t_f[i].fea.size()
+            t_f[i] = t_f[i].fea.view(b, c, -1)
+            s_f[i] = s_f[i].fea.view(b, c, -1)
+            ftloss += KLLoss(F.log_softmax(t_f[i] / self.temperature, dim=2), F.softmax(s_f[i] / self.temperature, dim=2)) * \
+                      (self.temperature * self.temperature / c)
+            # ftloss += ft_loss(t_f[i].fea, s_f[i].fea)
+        return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
+
+
 def feature_loss(x, y, at=True, ft=True):
     device = x[0].fea.device
     atloss = torch.zeros(1, device=device)
@@ -354,7 +482,7 @@ def wat_loss(x, y):
 
 
 def ft(x):
-    return F.normalize(x.pow(2).mean(2).mean(2).view(x.size(0), -1))
+    return x.pow(2).mean(2).mean(2).view(x.size(0), -1)
 
 
 def at(x):
@@ -369,201 +497,3 @@ def ft_loss(x, y):
 
 def at_loss(x, y):
     return (at(x) - at(y)).pow(2).mean()
-
-
-class Feature_Adap(nn.Module):
-    def __init__(self, input_channel, output_channel, kernel_size=3, padding=1):
-        super(Feature_Adap, self).__init__()
-        self.conv1 = nn.Conv2d(input_channel, output_channel, kernel_size=kernel_size, padding=padding)
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.relu(x)
-        return x
-
-
-class CSL(nn.Module):
-    def __init__(self):
-        super(CSL, self).__init__()
-
-    def forward(self, tf, sf, len, device):
-        loss = []
-        w_l = []
-        for i in range(len):
-            # 全局平均池化求得s,t的B,C 并正则化
-            qs = sf[i].fea.mean(3).mean(2)
-            qt = tf[i].fea.mean(3).mean(2)
-            # 线性转换  s_linear : 将学生的通道维数转换到与教师保持一致  t_linear : 将教师的通道维数转换到与学生保持一致
-            s_linear = nn.Linear(qs.shape[1], qt.shape[1], device=device)
-            t_linear = nn.Linear(qt.shape[1], qs.shape[1], device=device)
-            # 线性转换到通道数一致 并变为BC 并正则化
-            qs_t = s_linear(qs.type(torch.FloatTensor).to(device))
-            qt_s = t_linear(qt.type(torch.FloatTensor).to(device))
-
-            # 分别求得教师与学生每个通道的权重
-            w_t = (qt.to(device) - qs_t).pow(2).view(qt.shape[0], qt.shape[1], 1, 1)
-            w_s = (qs.to(device) - qt_s).pow(2).view(qs.shape[0], qs.shape[1], 1, 1)
-            # 将权重软化
-            w_s_soft = F.softmax(w_s, dim=1)
-            w_t_soft = F.softmax(w_t, dim=1)
-
-            # 分别乘以各自权重
-            t = torch.mul(w_t_soft, tf[i].fea)
-            s = torch.mul(w_s_soft, sf[i].fea)
-
-            # 每个C3层对应的损失
-            diff = at_loss(s, t)
-            loss.append(diff)
-
-            # 层与层之间的权重
-            weight = torch.add(w_t.mean(), w_s.mean()) / 2
-            w_l.append(weight)
-
-        w_l = F.softmax(torch.tensor(w_l, device=device), dim=0)
-
-        return loss
-
-
-def creat_mask_map(targets, anch_wh, imgs, feature_size):
-    # 放到特征图对应的大小上
-    device = imgs.device
-    anch_wh = [x * feature_size / imgs.shape[3] for x in anch_wh]
-    bz = (targets[targets.shape[0] - 1][0] + 1).long().item()
-    mask_list = np.zeros((bz, feature_size, feature_size))
-    # 用来把真实标签还原的
-    gain = torch.ones(6, device=device)
-    gain[2:] = torch.tensor(feature_size)
-    # t为真实标签在对应特征图上的大小
-    targets = targets.to(device)
-    t = targets * gain
-    # nt:真实标签的数量
-    nt = targets.shape[0]
-    for i in range(feature_size):
-        for j in range(feature_size):
-            iou = 0
-            max_iou = 0
-
-            for n in range(nt):
-                anch_xywh1 = [i, j, anch_wh[0], anch_wh[1]]
-                anch_xywh1 = torch.tensor(anch_xywh1, device=device)
-                anch_xywh2 = [i, j, anch_wh[2], anch_wh[3]]
-                anch_xywh2 = torch.tensor(anch_xywh2, device=device)
-                anch_xywh3 = [i, j, anch_wh[4], anch_wh[5]]
-                anch_xywh3 = torch.tensor(anch_xywh3, device=device)
-                iou1 = bbox_iou(anch_xywh1, t[n][2:], x1y1x2y2=False)
-                iou2 = bbox_iou(anch_xywh2, t[n][2:], x1y1x2y2=False)
-                iou3 = bbox_iou(anch_xywh3, t[n][2:], x1y1x2y2=False)
-                k = t[n][0].long().item()
-                k1 = t[n - 1][0].long().item()
-                if n > 0 and k == k1:
-                    iou += iou1 + iou2 + iou3
-                    mask_list[k][i][j] += iou
-                    max_iou = max_iou if max_iou >= iou else iou
-                else:
-                    iou = iou1 + iou2 + iou3
-                    mask_list[k][i][j] += iou
-                    max_iou = max_iou if max_iou >= iou else iou
-
-    mask_list[mask_list < max_iou.item() * 0.5] = 0
-    mask_list[mask_list >= max_iou.item() * 0.5] = 1
-    mask_map = torch.tensor(mask_list, device=device)
-
-    return mask_map
-
-
-def creat_mask_map_2(pred, targets, feature_size, model):
-    det = model.module.model[-1] if is_parallel(model) else model.model[-1]
-    # na:anchor数量  nt:真实标签数量
-    na, nt = det.na, targets.shape[0]
-
-    tcls, tbox, indices, anch = [], [], [], []
-    # 为了将gt放在feature的尺寸上面
-    gain = torch.ones(7, device=targets.device)
-    # ai就代表每个尺度的索引，默认里面的值为0,1,2
-    ai = torch.arange(na, device=targets.device).float().view(na, 1).repeat(1, nt)
-    # targets： [na, nt, 7]    其中7表示: i c x y w h ai； ai就代表每个尺度的索引，默认里面的值为0,1,2
-    targets = torch.cat((targets.repeat(na, 1, 1), ai[:, :, None]), 2)
-
-    # 设置偏置矩阵
-    g = 0.5  # bias
-    off = torch.tensor([[0, 0],
-                        [1, 0], [0, 1], [-1, 0], [0, -1],  # j,k,l,m
-                        # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
-                        ], device=targets.device).float() * g  # offsets
-
-    for i in range(det.nl):  # nl=>3
-        # anchors 匹配需要逐层匹配
-        anchors = det.anchors[i]  # shape=>[3,3,2]
-        gain[2:6] = torch.tensor(pred[i].shape)[[3, 2, 3, 2]]
-        # 将targets放在对应尺寸上面
-        t = targets * gain
-
-        if nt:
-            r = t[:, :, 4:6] / anchors[:, None]  # wh ratio
-            j = torch.max(r, 1. / r).max(2)[0] < model.hyp['anchor_t']  # compare
-            # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
-            # 可以不过滤
-            t = t[j]  # filter
-
-            gxy = t[:, 2:4]  # 格子xy，存储以特征图==左上角==为零点的gt box的(x,y)坐标
-            gxi = gain[[2, 3]] - gxy  # 取反 即：以特征图==右下角==为零点的gt box的(x,y)坐标信息
-            # 这两个条件可以用来选择靠近的两个邻居网格
-            j, k = ((gxy % 1. < g) & (gxy > 1.)).T
-            l, m = ((gxi % 1. < g) & (gxi > 1.)).T
-            j = torch.stack((torch.ones_like(j), j, k, l, m))
-            t = t.repeat((5, 1, 1))[j]  # 过滤box
-            offsets = (torch.zeros_like(gxy)[None] + off[:, None])[j]  # 过滤偏置
-
-            # b表示当前bbox属于该batch内第几张图片，c表示这张照片属于哪类
-            b, c = t[:, :2].long().T
-            gxy = t[:, 2:4]  # grid xy
-            gwh = t[:, 4:6]  # grid wh
-            gij = (gxy - offsets).long()  # 取整
-            gi, gj = gij.T  # 网格xy位置
-            # a表示当前gt box和当前层的第几个anchor匹配上了
-            a = t[:, 6].long()  # anchor indices
-            indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
-
-            tbox.append(torch.cat((gxy - gij, gwh), 1))  #
-            anch.append(anchors[a])  # anchors
-            tcls.append(c)  # class
-
-
-def creat_mask_map_1(targets, imgs, feature_size):
-    # 放到特征图对应的大小上
-    device = imgs.device
-    # 获取batch_size
-    bz = (targets[targets.shape[0] - 1][0] + 1).long().item()
-    # 初始化mask_list
-    mask_list = np.zeros((bz, feature_size, feature_size))
-    # 用来把真实标签还原的
-    gain = torch.ones(6, device=device)
-    gain[2:] = torch.tensor(feature_size)
-    # t为5实标签在对应特征图上的大小
-    targets = targets.to(device)
-    t = targets * gain
-    # nt:真实标签的数量
-    nt = targets.shape[0]
-
-    for n in range(nt):
-        # batch_size 的id
-        bi = t[n][0].long().item()
-        # x1 < x2   y1 < y2  所以x1 y1  向下取整   x2 y2 向上取整
-        x1 = t[n][2].item() - t[n][4].item() / 2
-        x1 = math.floor(x1)
-        x2 = t[n][2].item() + t[n][4].item() / 2
-        x2 = math.ceil(x2)
-        y1 = t[n][3].item() - t[n][5].item() / 2
-        y1 = math.floor(y1)
-        y2 = t[n][3].item() + t[n][5].item() / 2
-        y2 = math.ceil(y2)
-
-        for i in range(x1, x2 + 1):
-            for j in range(y1, y2 + 1):
-                if i < feature_size and j < feature_size:
-                    mask_list[bi][i][j] = 1
-
-    mask_map = torch.tensor(mask_list, device=device)
-
-    return mask_map
