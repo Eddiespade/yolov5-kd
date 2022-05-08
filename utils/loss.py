@@ -474,20 +474,27 @@ def creat_mask(cur, labels):
     cur[labels[0].cpu().numpy()][y1: y2, x1: x2] = 0.75
 
 
-def EFKD(targets, x, y, at=True, ft=True):
-    device = x[0].fea.device
-    atloss = torch.zeros(1, device=device)
-    ftloss = torch.zeros(1, device=device)
-    for i in range(len(x)):
-        if at:
-            b, c, h, w = x[i].fea.size()
+class EFKD(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.s_t_pair = [64, 128, 256, 512, 256, 128, 256, 512]
+        self.t_s_pair = [96, 192, 384, 768, 384, 192, 384, 768]
+        self.linears = nn.ModuleList([conv1x1_bn(s, 2 * s).to("cuda:0") for s in self.s_t_pair])
+        # self.linears = nn.ModuleList([conv1x1_bn(s, 2 * s).to("cuda:0") for s, t in zip(self.s_t_pair, self.t_s_pair)])
+
+    def forward(self, targets, t_f, s_f):
+        device = t_f[0].fea.device
+        atloss = torch.zeros(1, device=device)
+        ftloss = torch.zeros(1, device=device)
+        for i in range(len(t_f)):
+            b, c, h, w = s_f[i].fea.size()
             cur_mask = torch.full((b, h, w), 0.25, device=device)
             for label in targets:
                 creat_mask(cur_mask, label)
-            atloss += wat_loss(x[i].fea, y[i].fea, cur_mask.view(b, -1))
-        if ft:
-            ftloss += ft_loss(x[i].fea, y[i].fea)
-    return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
+            atloss += wat_loss(t_f[i].fea, s_f[i].fea, cur_mask.view(b, -1))
+            s_f[i].fea = self.linears[i](s_f[i].fea)
+            ftloss += ft_loss(t_f[i].fea, s_f[i].fea)
+        return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
 
 
 def wat_loss(x, y, mask):
