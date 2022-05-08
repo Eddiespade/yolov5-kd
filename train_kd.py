@@ -369,7 +369,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                         t_f = get_t_feas_by_hook(teacher_model)
                         teacher_pred = teacher_model(imgs)
 
-                    ftloss, ftloss_items = eat_loss(t_f, s_f)
+                    ftloss, ftloss_items = eat_loss(targets.to(device), t_f, s_f)
                 del s_f, t_f
 
                 loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size

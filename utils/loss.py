@@ -139,7 +139,6 @@ class ComputeLoss:
         anch:List(tensor*3)  tensor:(N)    为anchor的索引,如0,1,2,0,0,1...  因为不同尺度用不同大小的anchor
 
         '''
-        print(targets.shape)
         lcls = torch.zeros(1, device=self.device)  # class loss
         lbox = torch.zeros(1, device=self.device)  # box loss
         lobj = torch.zeros(1, device=self.device)  # object loss
