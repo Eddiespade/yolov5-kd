@@ -139,6 +139,7 @@ class ComputeLoss:
         anch:List(tensor*3)  tensor:(N)    为anchor的索引,如0,1,2,0,0,1...  因为不同尺度用不同大小的anchor
 
         '''
+        print(targets.shape)
         lcls = torch.zeros(1, device=self.device)  # class loss
         lbox = torch.zeros(1, device=self.device)  # box loss
         lobj = torch.zeros(1, device=self.device)  # object loss
@@ -328,7 +329,7 @@ def compute_kd_output_loss(pred, teacher_pred, model, kd_loss_selected="l2", tem
 
 
 class CoordAtt(nn.Module):
-    def __init__(self, inp, oup, groups=32):
+    def __init__(self, inp, oup, groups=4):
         super(CoordAtt, self).__init__()
         self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
         self.pool_w = nn.AdaptiveAvgPool2d((1, None))
@@ -388,7 +389,7 @@ class EFTLoss(nn.Module):
         self.s_t_pair = [64, 128, 256, 512, 256, 128, 256, 512]
         self.t_s_pair = [96, 192, 384, 768, 384, 192, 384, 768]
 
-        self.linears = nn.ModuleList([conv1x1_bn(s, "cuda:0") for s in self.s_t_pair])
+        self.linears = nn.ModuleList([conv1x1_bn(s, t).to("cuda:0") for s, t in zip(self.s_t_pair, self.t_s_pair)])
         # self.Ca = nn.ModuleList([CoordAtt(2 * s, 2 * s).to("cuda:0") for s in self.s_t_pair])
         # self.se1 = nn.ModuleList([SE_Block(t).to("cuda:0") for t in self.t_s_pair])
         # self.se2 = nn.ModuleList([SE_Block(s).to("cuda:0") for s in self.s_t_pair])
@@ -407,10 +408,10 @@ class EFTLoss(nn.Module):
         return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
 
 
-def conv1x1_bn(in_channel, device):
+def conv1x1_bn(in_channel, out_channel):
     return nn.Sequential(
-        nn.Conv2d(in_channel, 2 * in_channel, kernel_size=1, stride=1, padding=0, bias=False, device=device),
-        nn.BatchNorm2d(2 * in_channel, device=device),
+        nn.Conv2d(in_channel, out_channel, kernel_size=1, stride=1, padding=0, bias=False),
+        nn.BatchNorm2d(out_channel),
         nn.SiLU()
     )
 
@@ -445,21 +446,6 @@ def feature_loss(x, y, at=True, ft=True):
     return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
 
 
-def wat_loss(x, y):
-    device = x[0].fea.device
-    w = torch.zeros(8, device=device)
-    atloss = torch.zeros(1, device=device)
-    ftloss = torch.zeros(1, device=device)
-    for i in range(len(x)):
-        w[i] = ft_loss(x[i].fea, y[i].fea)
-    w = F.softmax(w, dim=0)
-
-    # 计算权重
-    for i in range(len(x)):
-        atloss += w[i] * at_loss(x[i].fea, y[i].fea)
-    return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
-
-
 def ft(x):
     return F.normalize(x.pow(2).mean(2).mean(2).view(x.size(0), -1))
 
@@ -476,3 +462,33 @@ def ft_loss(x, y):
 
 def at_loss(x, y):
     return (at(x) - at(y)).pow(2).mean()
+
+
+def creat_mask(cur, labels):
+    B, H, W = cur.size()
+    x, y, w, h = labels[2:]
+    x1 = int(((x - w / 2) * W).ceil().cpu().numpy())
+    x2 = int(((x + w / 2) * W).floor().cpu().numpy())
+    y1 = int(((y - h / 2) * W).ceil().cpu().numpy())
+    y2 = int(((y + h / 2) * W).floor().cpu().numpy())
+    cur[labels[0].cpu().numpy()][y1: y2, x1: x2] = 0.75
+
+
+def EFKD(targets, x, y, at=True, ft=True):
+    device = x[0].fea.device
+    atloss = torch.zeros(1, device=device)
+    ftloss = torch.zeros(1, device=device)
+    for i in range(len(x)):
+        if at:
+            b, c, h, w = x[i].fea.size()
+            cur_mask = torch.full((b, h, w), 0.25, device=device)
+            for label in targets:
+                creat_mask(cur_mask, label)
+            atloss += wat_loss(x[i].fea, y[i].fea, cur_mask.view(b, -1))
+        if ft:
+            ftloss += ft_loss(x[i].fea, y[i].fea)
+    return atloss + ftloss, torch.cat((atloss, ftloss)).detach()
+
+
+def wat_loss(x, y, mask):
+    return ((at(x) - at(y)) * mask).pow(2).mean()
