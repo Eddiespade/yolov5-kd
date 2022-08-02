@@ -485,7 +485,6 @@ class EFKD(nn.Module):
     def forward(self, targets, t_f, s_f, ratio):
         device = t_f[0].fea.device
         atloss = torch.zeros(1, device=device)
-        print(self.linears)
         ftloss = torch.zeros(1, device=device)
         for i in range(len(t_f)):
             b, c, h, w = s_f[i].fea.size()

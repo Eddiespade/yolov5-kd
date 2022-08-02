@@ -156,8 +156,6 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         loggers.on_params_update({"batch_size": batch_size})
 
     # Optimizer
-    print("----------------------------", opt.isL)
-    print("----------------------------", opt.kd)
     nbs = 64  # nominal batch size
     accumulate = max(round(nbs / batch_size), 1)  # accumulate loss before optimizing
     hyp['weight_decay'] *= batch_size * accumulate / nbs  # scale weight_decay
