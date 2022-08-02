@@ -156,6 +156,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         loggers.on_params_update({"batch_size": batch_size})
 
     # Optimizer
+    print("----------------------------", opt.isL)
+    print("----------------------------", opt.kd)
     nbs = 64  # nominal batch size
     accumulate = max(round(nbs / batch_size), 1)  # accumulate loss before optimizing
     hyp['weight_decay'] *= batch_size * accumulate / nbs  # scale weight_decay
@@ -513,14 +515,14 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
     # ---------------------------------------- kd parser ---------------------------------------
-    parser.add_argument('--kd', type=bool, default=True, help='cache images for faster training')
+    parser.add_argument('--kd', action='store_true', default=True, help='cache images for faster training')
     parser.add_argument('--teacher_weight', type=str, default='weights/yolov5m.pt',
                         help='initial teacher_weight path')
     parser.add_argument('--kd_loss_selected', type=str, default='l2', help='using kl/l2 loss in distillation')
     parser.add_argument('--temperature', type=int, default=20, help='temperature in distilling training')
     parser.add_argument('--alpha', default=1, type=float)
     parser.add_argument('--beta', default=1e+3, type=float)
-    parser.add_argument('--isL', default=False, type=bool, help='if True, means using yolov5l as teacher, else yolov5m')
+    parser.add_argument('--isL', action='store_true', help='if True, means using yolov5l as teacher, else yolov5m')
     parser.add_argument('--ratio', default=0.25, type=float, help='backgroud ratio in distillation')
     # -------------------------------------- source parser -------------------------------------
     parser.add_argument('--weights', type=str, default=ROOT / '', help='initial weights path')

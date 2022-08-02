@@ -46,9 +46,9 @@
 - 蒸馏训练
 ```shell
   cd yolov5-kd
-  # 如果教师网络采用m的话  isL 设为 False， 如果为L 则设为 True；暂时只支持 L 对 s 或者 m 对 s的蒸馏训练
+  # 如果教师网络采用m的话不采用 --isL， 否则设置 --isL 表示采用教师网络为 yolov5l  
   # YOUR_TEACHER_PT_ROOT 改为自己预训练好的教师网络pt路径
-  python train_kd.py --teacher_weight YOUR_TEACHER_PT_ROOT --isL False --epochs 100 --batch-size 32 --name m2s --device 0
+  python train_kd.py --teacher_weight YOUR_TEACHER_PT_ROOT --isL --epochs 100 --batch-size 32 --name m2s --device 0
   ```
 
 
