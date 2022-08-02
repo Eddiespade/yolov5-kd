@@ -48,7 +48,10 @@
   cd yolov5-kd
   # 如果教师网络采用m的话不采用 --isL， 否则设置 --isL 表示采用教师网络为 yolov5l  
   # YOUR_TEACHER_PT_ROOT 改为自己预训练好的教师网络pt路径
-  python train_kd.py --teacher_weight YOUR_TEACHER_PT_ROOT --isL --epochs 100 --batch-size 32 --name m2s --device 0
+  # 教师网络为 yolov5m
+  python train_kd.py --teacher_weight YOUR_TEACHER_PT_ROOT --epochs 100 --batch-size 32 --name m2s --device 0
+  # 教师网络为 yolov5l
+  python train_kd.py --teacher_weight YOUR_TEACHER_PT_ROOT --epochs 100 --batch-size 32 --name m2s --device 0 --isL
   ```
 
 
