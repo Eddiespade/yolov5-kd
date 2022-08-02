@@ -5,6 +5,74 @@
 - 学会了AutoDL云服务器的使用，3090 1.99元/h 爽
 
 
+## 如何训练
+- 下载数据集，结构如图所示：
+
+  链接: https://pan.baidu.com/s/1HZIdOi0JOpgVAq-ZI_g5jQ 提取码: r98i
+```shell
+.
+├── datasets
+│   └── VOC
+│       ├── images
+│       │   ├── test2007
+│       │   ├── train2007
+│       │   ├── train2012
+│       │   ├── val2007
+│       │   └── val2012
+│       └── labels
+│           ├── test2007
+│           ├── train2007
+│           └── train2012
+```
+
+- 自己预训练好教师网络(ps: 如果采用的是coco数据集则可以使用预训练权重，否则需要自己训练)：
+  
+  主要是因为数据集的类别数量不一致
+  - [yolov5m.pt](https://github.com/ultralytics/yolov5/releases/download/v6.0/yolov5m.pt)
+  - [yolov5l.pt](https://github.com/ultralytics/yolov5/releases/download/v6.0/yolov5l.pt)
+  
+  ```shell
+  cd yolov5-kd
+  python train.py --cfg models/yolov5m.yaml --epochs 100 --batch-size 32 --name m --device 0
+  python train.py --cfg models/yolov5l.yaml --epochs 100 --batch-size 32 --name l --device 0
+  ```
+- ```shell
+  .
+  ├── weights
+  │   └── yolov5m.pt
+  │   └── yolov5l.pt
+  ```
+
+- 蒸馏训练
+```shell
+  cd yolov5-kd
+  # 如果教师网络采用m的话  isL 设为 False， 如果为L 则设为 True；暂时只支持 L 对 s 或者 m 对 s的蒸馏训练
+  # YOUR_TEACHER_PT_ROOT 改为自己预训练好的教师网络pt路径
+  python train_kd.py --teacher_weight YOUR_TEACHER_PT_ROOT --isL False --epochs 100 --batch-size 32 --name m2s --device 0
+  ```
+
+
+### 可能报错
+- 报错1
+> 'Upsample' object has no attribute 'recompute_scale_factor'
+
+- 原因：torch版本太高导致相关函数参数改变
+- 解决方法
+```shell
+打开 环境root/lib/python3.x/site-packages/torch/nn/modules/upsampling.py
+
+修改代码
+
+def forward(self, input: Tensor) -> Tensor:
+    return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
+
+# return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners,
+#                      recompute_scale_factor=self.recompute_scale_factor)
+```
+
+
+
+
 ## 更新日志
 - 2022/5/6  新增了绘制曲线图的py文件
 - 2022/5/5  复现了CD算法，实现了自己的创新点
@@ -455,14 +523,14 @@ head:
 ## 调整三：将中间层特征图匹配上
 ```python
 # 教师网络（Yolov5m）中间层特征shape        # 学生网络（Yolov5s）中间层特征shape    # diffChannel
-    torch.Size([8, 96, 160, 160])    -->     torch.Size([8, 64, 160, 160])         32   
-    torch.Size([8, 192, 80, 80])     -->     torch.Size([8, 128, 80, 80])          64
-    torch.Size([8, 384, 40, 40])     -->     torch.Size([8, 256, 40, 40])          128
-    torch.Size([8, 768, 20, 20])     -->     torch.Size([8, 512, 20, 20])          256
-    torch.Size([8, 384, 40, 40])     -->     torch.Size([8, 256, 40, 40])          128
-    torch.Size([8, 192, 80, 80])     -->     torch.Size([8, 128, 80, 80])          64
-    torch.Size([8, 384, 40, 40])     -->     torch.Size([8, 256, 40, 40])          32
-    torch.Size([8, 768, 20, 20])     -->     torch.Size([8, 512, 20, 20])          256
+    torch.Size([8, 96, 160, 160])               <-->     torch.Size([8, 64, 160, 160])         32   
+    torch.Size([8, 192, 80, 80])                <-->     torch.Size([8, 128, 80, 80])          64
+    torch.Size([8, 384, 40, 40])                <-->     torch.Size([8, 256, 40, 40])          128
+    torch.Size([8, 768, 20, 20])                <-->     torch.Size([8, 512, 20, 20])          256
+    torch.Size([8, 384, 40, 40])                <-->     torch.Size([8, 256, 40, 40])          128
+    torch.Size([8, 192, 80, 80])                <-->     torch.Size([8, 128, 80, 80])          64
+    torch.Size([8, 384, 40, 40])                <-->     torch.Size([8, 256, 40, 40])          32
+    torch.Size([8, 768, 20, 20])                <-->     torch.Size([8, 512, 20, 20])          256
 # Yolov5l:
     torch.Size([2, 128, 160, 160])
     torch.Size([2, 256, 80, 80])

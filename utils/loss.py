@@ -463,33 +463,35 @@ def at_loss(x, y):
     return (at(x) - at(y)).pow(2).mean()
 
 
-def creat_mask(cur, labels):
+def creat_mask(cur, labels, ratio):
     B, H, W = cur.size()
     x, y, w, h = labels[2:]
     x1 = int(((x - w / 2) * W).ceil().cpu().numpy())
     x2 = int(((x + w / 2) * W).floor().cpu().numpy())
     y1 = int(((y - h / 2) * W).ceil().cpu().numpy())
     y2 = int(((y + h / 2) * W).floor().cpu().numpy())
-    cur[labels[0].cpu().numpy()][y1: y2, x1: x2] = 0.75
+    cur[labels[0].cpu().numpy()][y1: y2, x1: x2] = 1 - ratio
 
 
 class EFKD(nn.Module):
-    def __init__(self):
+    def __init__(self, isL=False):
         super().__init__()
         self.s_t_pair = [64, 128, 256, 512, 256, 128, 256, 512]
         self.t_s_pair = [96, 192, 384, 768, 384, 192, 384, 768]
-        self.linears = nn.ModuleList([conv1x1_bn(s, 2 * s).to("cuda:0") for s in self.s_t_pair])
-        # self.linears = nn.ModuleList([conv1x1_bn(s, 2 * s).to("cuda:0") for s, t in zip(self.s_t_pair, self.t_s_pair)])
+        self.linears = nn.ModuleList([conv1x1_bn(s, t).to("cuda:0") for s, t in zip(self.s_t_pair, self.t_s_pair)])
+        if isL:
+            self.linears = nn.ModuleList([conv1x1_bn(s, 2 * s).to("cuda:0") for s in self.s_t_pair])
 
-    def forward(self, targets, t_f, s_f):
+    def forward(self, targets, t_f, s_f, ratio):
         device = t_f[0].fea.device
         atloss = torch.zeros(1, device=device)
+        print(self.linears)
         ftloss = torch.zeros(1, device=device)
         for i in range(len(t_f)):
             b, c, h, w = s_f[i].fea.size()
-            cur_mask = torch.full((b, h, w), 0.25, device=device)
+            cur_mask = torch.full((b, h, w), ratio, device=device)
             for label in targets:
-                creat_mask(cur_mask, label)
+                creat_mask(cur_mask, label, ratio)
             atloss += wat_loss(t_f[i].fea, s_f[i].fea, cur_mask.view(b, -1))
             s_f[i].fea = self.linears[i](s_f[i].fea)
             ftloss += ft_loss(t_f[i].fea, s_f[i].fea)

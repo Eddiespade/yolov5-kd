@@ -22,8 +22,8 @@ class HookTool:
 
 def get_feas_by_hook(model):
     fea_hooks = []
-    # for i in [2, 4, 6, 9, 13, 17, 20, 23]:
-    for i in [3, 6, 9, 13, 18, 23, 27, 31]:
+    for i in [2, 4, 6, 9, 13, 17, 20, 23]:
+    # for i in [3, 6, 9, 13, 18, 23, 27, 31]:
         m = model.model[i]
         cur_hook = HookTool()
         m.register_forward_hook(cur_hook.hook_fun)
