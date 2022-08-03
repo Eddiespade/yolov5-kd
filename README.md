@@ -6,9 +6,8 @@
 
 
 ## 如何训练
-- 下载数据集，结构如图所示：
+- [下载数据集，提取码: r98i](https://pan.baidu.com/s/1HZIdOi0JOpgVAq-ZI_g5jQ )，结构如图所示：
 
-  链接: https://pan.baidu.com/s/1HZIdOi0JOpgVAq-ZI_g5jQ 提取码: r98i
 ```shell
 .
 ├── datasets
@@ -26,8 +25,9 @@
 ```
 
 - 自己预训练好教师网络(ps: 如果采用的是coco数据集则可以使用预训练权重，否则需要自己训练)：
+  [本人训练的教师网络, 提取码: 21ne](https://pan.baidu.com/s/1GRaHdkxHPzmqEbxZILfztQ) 
   
-  主要是因为数据集的类别数量不一致
+   主要是因为数据集的类别数量不一致，官方在coco数据集上预训练的权重下载如下：
   - [yolov5m.pt](https://github.com/ultralytics/yolov5/releases/download/v6.0/yolov5m.pt)
   - [yolov5l.pt](https://github.com/ultralytics/yolov5/releases/download/v6.0/yolov5l.pt)
   
@@ -49,9 +49,9 @@
   # 如果教师网络采用m的话不采用 --isL， 否则设置 --isL 表示采用教师网络为 yolov5l  
   # YOUR_TEACHER_PT_ROOT 改为自己预训练好的教师网络pt路径
   # 教师网络为 yolov5m
-  python train_kd.py --teacher_weight YOUR_TEACHER_PT_ROOT --epochs 100 --batch-size 32 --name m2s --device 0
+  python train_kd.py --teacher_weight runs/yolov5m/weights/best.pt --epochs 100 --batch-size 32 --name m2s --device 0
   # 教师网络为 yolov5l
-  python train_kd.py --teacher_weight YOUR_TEACHER_PT_ROOT --epochs 100 --batch-size 32 --name m2s --device 0 --isL
+  python train_kd.py --teacher_weight runs/yolov5l/weights/best.pt --epochs 100 --batch-size 32 --name m2s --device 0 --isL
   ```
 
 
